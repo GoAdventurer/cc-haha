@@ -896,17 +896,32 @@ function formatAgentStructuredResult(content: unknown): string {
 
 function parseStructuredAgentContent(content: unknown): Record<string, unknown> | unknown[] | null {
   if (typeof content === 'string') {
-    const trimmed = content.trim()
-    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
-    try {
-      const parsed = JSON.parse(trimmed) as unknown
-      return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> | unknown[] : null
-    } catch {
-      return null
-    }
+    return parseStructuredAgentText(content)
   }
 
-  return typeof content === 'object' && content !== null ? content as Record<string, unknown> | unknown[] : null
+  if (Array.isArray(content)) {
+    return parseStructuredAgentText(extractTextContent(content))
+  }
+
+  if (content && typeof content === 'object') {
+    if ('results' in content) return content as Record<string, unknown>
+
+    const extracted = extractTextContent(content)
+    return extracted ? parseStructuredAgentText(extracted) : null
+  }
+
+  return null
+}
+
+function parseStructuredAgentText(text: string): Record<string, unknown> | unknown[] | null {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> | unknown[] : null
+  } catch {
+    return null
+  }
 }
 
 function formatAgentStructuredResultItem(result: unknown, index: number): string {
@@ -920,6 +935,29 @@ function formatAgentStructuredResultItem(result: unknown, index: number): string
   const context = getStringField(record, 'context')
   const snippet = getStringField(record, 'snippet')
   const message = getStringField(record, 'message') || getStringField(record, 'text') || getStringField(record, 'summary')
+  const nestedItems = Array.isArray(record.items) ? record.items : []
+
+  if (nestedItems.length > 0) {
+    const label = getStringField(record, 'risk') || getStringField(record, 'title') || message || 'Grouped results'
+    const lines = [`${index + 1}. ${formatAgentGroupLabel(label)}`]
+    if (context) lines.push(`   - ${context}`)
+    if (snippet) lines.push(`   - ${snippet}`)
+
+    nestedItems
+      .map(formatAgentStructuredNestedItem)
+      .filter(Boolean)
+      .forEach((item) => {
+        lines.push(
+          item
+            .split('\n')
+            .map((line, lineIndex) => `${lineIndex === 0 ? '   - ' : '     '}${line}`)
+            .join('\n'),
+        )
+      })
+
+    return lines.join('\n')
+  }
+
   const lines = [`${index + 1}. ${location ? formatInlineCode(location) : 'Result'}`]
 
   if (message) lines.push(`   - ${message}`)
@@ -927,6 +965,31 @@ function formatAgentStructuredResultItem(result: unknown, index: number): string
   if (snippet) lines.push(`   - ${snippet}`)
 
   return lines.join('\n')
+}
+
+function formatAgentStructuredNestedItem(item: unknown): string {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return extractTextContent(item).trim()
+  }
+
+  const record = item as Record<string, unknown>
+  const location = formatAgentResultLocation(record)
+  const context = getStringField(record, 'context')
+  const snippet = getStringField(record, 'snippet')
+  const message = getStringField(record, 'message') || getStringField(record, 'text') || getStringField(record, 'summary')
+  const headingParts = [location ? formatInlineCode(location) : '', message].filter(Boolean)
+  const lines = [headingParts.join(' - ') || 'Result']
+
+  if (context) lines.push(context)
+  if (snippet) lines.push(snippet)
+
+  return lines.join('\n')
+}
+
+function formatAgentGroupLabel(label: string): string {
+  const normalized = label.trim()
+  if (!normalized) return 'Grouped results'
+  return normalized.length > 1 ? `${normalized[0].toUpperCase()}${normalized.slice(1)}` : normalized.toUpperCase()
 }
 
 function formatAgentResultLocation(record: Record<string, unknown>): string {

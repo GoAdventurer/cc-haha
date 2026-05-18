@@ -1151,21 +1151,31 @@ describe('MessageList nested tool calls', () => {
               id: 'result-agent',
               type: 'tool_result',
               toolUseId: 'agent-1',
-              content: {
-                results: [
-                  {
-                    file: 'git:v0.2.6..v0.2.7',
-                    line: 0,
-                    snippet: 'v0.2.7 tag = a4c92ec7',
-                    context: '版本范围判断：release-notes/v0.2.7.md 明确相比 v0.2.6。',
-                  },
-                  {
-                    file: '/tmp/example/src/lib.rs',
-                    line: 220,
-                    context: '中风险：服务默认监听 0.0.0.0。',
-                  },
-                ],
-              },
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    results: [
+                      {
+                        file: 'git:v0.2.6..v0.2.7',
+                        line: 0,
+                        snippet: 'v0.2.7 tag = a4c92ec7',
+                        context: '版本范围判断：release-notes/v0.2.7.md 明确相比 v0.2.6。',
+                      },
+                      {
+                        risk: 'medium',
+                        items: [
+                          {
+                            file: '/tmp/example/src/lib.rs',
+                            line: 220,
+                            context: '中风险：服务默认监听 0.0.0.0。',
+                          },
+                        ],
+                      },
+                    ],
+                  }),
+                },
+              ],
               isError: false,
               timestamp: 2,
             },
