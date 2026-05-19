@@ -1641,6 +1641,64 @@ describe('chatStore history mapping', () => {
     vi.useRealTimers()
   })
 
+  it('marks a background shell task stopped when TaskStop returns before a task notification', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-19T13:34:19.000Z'))
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'shell-task-1',
+        tool_use_id: 'shell-tool-1',
+        description: 'Start tap proxy',
+        task_type: 'local_bash',
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'TaskStop',
+      toolUseId: 'task-stop-1',
+      input: { task_id: 'shell-task-1' },
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_result',
+      toolUseId: 'task-stop-1',
+      isError: false,
+      content: JSON.stringify({
+        message: 'Successfully stopped task: shell-task-1 (tap proxy)',
+        task_id: 'shell-task-1',
+        task_type: 'local_bash',
+        command: 'tap proxy',
+      }),
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.backgroundAgentTasks?.['shell-task-1']).toMatchObject({
+      status: 'stopped',
+      taskType: 'local_bash',
+      description: 'tap proxy',
+    })
+    expect(session?.messages.find((message) => message.type === 'background_task')).toMatchObject({
+      type: 'background_task',
+      task: {
+        taskId: 'shell-task-1',
+        status: 'stopped',
+        taskType: 'local_bash',
+        description: 'tap proxy',
+      },
+    })
+
+    vi.useRealTimers()
+  })
+
   it('removes stale agent task transcript cards by matching tool use id', () => {
     useChatStore.setState({
       sessions: {

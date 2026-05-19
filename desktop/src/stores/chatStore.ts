@@ -32,6 +32,7 @@ import type {
 } from '../types/chat'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+type ToolCall = Extract<UIMessage, { type: 'tool_use' }>
 
 export type ComposerDraftState = {
   input: string
@@ -143,6 +144,7 @@ type ChatStore = {
 }
 
 const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList', 'TodoWrite'])
+const TASK_STOP_TOOL_NAMES = new Set(['TaskStop', 'KillShell'])
 const pendingTaskToolUseIdsBySession = new Map<string, Set<string>>()
 const pendingToolParentUseIdsBySession = new Map<string, Map<string, string>>()
 
@@ -1059,15 +1061,32 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
 
       case 'tool_result': {
+        const now = Date.now()
         const pendingParentToolUseId = consumePendingToolParentUseId(sessionId, msg.toolUseId)
         const parentToolUseId = msg.parentToolUseId ?? pendingParentToolUseId
-        update((s) => ({
-          messages: [...s.messages, {
+        update((s) => {
+          let messages: UIMessage[] = [...s.messages, {
             id: nextId(), type: 'tool_result', toolUseId: msg.toolUseId,
-            content: msg.content, isError: msg.isError, timestamp: Date.now(), parentToolUseId,
-          }],
-          chatState: 'thinking', activeThinkingId: null,
-        }))
+            content: msg.content, isError: msg.isError, timestamp: now, parentToolUseId,
+          }]
+          let backgroundAgentTasks = s.backgroundAgentTasks ?? {}
+          const stoppedTask = msg.isError
+            ? null
+            : getStoppedBackgroundTaskFromToolResult(s.messages, msg.toolUseId, msg.content)
+          if (stoppedTask) {
+            backgroundAgentTasks = upsertBackgroundAgentTask(backgroundAgentTasks, stoppedTask, now)
+            const task = backgroundAgentTasks[stoppedTask.taskId]
+            if (task) {
+              messages = upsertBackgroundTaskMessage(messages, task, now)
+            }
+          }
+          return {
+            messages,
+            ...(stoppedTask ? { backgroundAgentTasks } : {}),
+            chatState: 'thinking',
+            activeThinkingId: null,
+          }
+        })
         if (consumePendingTaskToolUseId(sessionId, msg.toolUseId)) {
           useCLITaskStore.getState().refreshTasks(sessionId)
         }
@@ -1468,6 +1487,55 @@ function readNonEmptyString(record: Record<string, unknown>, ...keys: string[]):
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
   return undefined
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  const record = readRecord(value)
+  if (record) return record
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{')) return null
+  try {
+    return readRecord(JSON.parse(trimmed))
+  } catch {
+    return null
+  }
+}
+
+function findToolUseMessage(messages: UIMessage[], toolUseId: string): ToolCall | null {
+  return messages.find((
+    message,
+  ): message is ToolCall =>
+    message.type === 'tool_use' &&
+    message.toolUseId === toolUseId) ?? null
+}
+
+function getStoppedBackgroundTaskFromToolResult(
+  messages: UIMessage[],
+  toolUseId: string,
+  content: unknown,
+): (Partial<BackgroundAgentTask> & Pick<BackgroundAgentTask, 'taskId' | 'status'>) | null {
+  const toolUse = findToolUseMessage(messages, toolUseId)
+  if (!toolUse || !TASK_STOP_TOOL_NAMES.has(toolUse.toolName)) return null
+
+  const input = readRecord(toolUse.input) ?? {}
+  const output = parseJsonRecord(content) ?? {}
+  const taskId = readNonEmptyString(output, 'task_id', 'taskId') ??
+    readNonEmptyString(input, 'task_id', 'taskId', 'shell_id', 'shellId')
+  if (!taskId) return null
+
+  return {
+    taskId,
+    status: 'stopped',
+    taskType: readNonEmptyString(output, 'task_type', 'taskType'),
+    description: readNonEmptyString(output, 'command', 'description', 'message'),
+    summary: readNonEmptyString(output, 'message'),
+  }
 }
 
 function normalizeBackgroundTaskUsage(value: unknown): BackgroundAgentTaskUsage | undefined {
