@@ -1,5 +1,4 @@
 import { useRef, useEffect, useMemo, memo, useState, useCallback, useLayoutEffect, type ReactNode } from 'react'
-import { flushSync } from 'react-dom'
 import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, MessageCircle, Settings, Target, XCircle } from 'lucide-react'
 import { ApiError } from '../../api/client'
 import { sessionsApi, type SessionTurnCheckpoint } from '../../api/sessions'
@@ -787,9 +786,7 @@ const SCROLL_BOTTOM_SENTINEL = 1_000_000_000
 const MAX_SCROLL_SNAPSHOTS = 100
 const VIRTUALIZE_MIN_RENDER_ITEMS = 120
 const VIRTUALIZE_MIN_CONTENT_CHARS = 120_000
-const VIRTUAL_IDLE_OVERSCAN_PX = 360
-const VIRTUAL_SCROLL_OVERSCAN_PX = 7200
-const VIRTUAL_SCROLL_IDLE_DELAY_MS = 180
+const VIRTUAL_OVERSCAN_PX = 1200
 const VIRTUAL_DEFAULT_VIEWPORT_HEIGHT = 720
 const VIRTUAL_MIN_ITEM_HEIGHT = 48
 const VIRTUAL_MAX_ITEM_HEIGHT = 24_000
@@ -1195,7 +1192,9 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
   const scrollContentRef = useRef<HTMLDivElement>(null)
   const virtualItemHeightsRef = useRef(new Map<string, number>())
   const virtualItemMetricCacheRef = useRef(new Map<string, VirtualRenderItemMetric>())
-  const virtualScrollIdleTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const pendingMeasuredHeightsRef = useRef(false)
+  const measureFlushFrameRef = useRef<number | null>(null)
+  const lastAutoScrollAtRef = useRef(0)
   const shouldAutoScrollRef = useRef(true)
   const isProgrammaticScrollingRef = useRef(false)
   const ignoreProgrammaticScrollUntilRef = useRef(0)
@@ -1215,7 +1214,6 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
     scrollTop: SCROLL_BOTTOM_SENTINEL,
     viewportHeight: VIRTUAL_DEFAULT_VIEWPORT_HEIGHT,
   })
-  const [isVirtualScrollActive, setIsVirtualScrollActive] = useState(false)
   const [measuredItemsVersion, setMeasuredItemsVersion] = useState(0)
   const branchActionsDisabled =
     isMemberSession ||
@@ -1228,8 +1226,8 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
     message.type === 'compact_summary' && message.phase === 'compacting')
 
   useEffect(() => () => {
-    if (virtualScrollIdleTimerRef.current) {
-      window.clearTimeout(virtualScrollIdleTimerRef.current)
+    if (measureFlushFrameRef.current !== null) {
+      cancelAnimationFrame(measureFlushFrameRef.current)
     }
   }, [])
 
@@ -1250,26 +1248,11 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
     })
   }, [])
 
-  const markVirtualScrollActive = useCallback(() => {
-    setIsVirtualScrollActive(true)
-    if (virtualScrollIdleTimerRef.current) {
-      window.clearTimeout(virtualScrollIdleTimerRef.current)
-    }
-    virtualScrollIdleTimerRef.current = window.setTimeout(() => {
-      setIsVirtualScrollActive(false)
-      virtualScrollIdleTimerRef.current = null
-    }, VIRTUAL_SCROLL_IDLE_DELAY_MS)
-  }, [])
-
   const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
     shouldAutoScrollRef.current = true
     isProgrammaticScrollingRef.current = true
     ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
-    setIsVirtualScrollActive(false)
-    if (virtualScrollIdleTimerRef.current) {
-      window.clearTimeout(virtualScrollIdleTimerRef.current)
-      virtualScrollIdleTimerRef.current = null
-    }
+    lastAutoScrollAtRef.current = performance.now()
     const container = scrollContainerRef.current
     let requestedScrollTop: number | null = null
     if (container) {
@@ -1311,20 +1294,33 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
     })
   }, [resolvedSessionId])
 
+  const flushMeasuredHeightVersion = useCallback(() => {
+    if (!pendingMeasuredHeightsRef.current) return
+    pendingMeasuredHeightsRef.current = false
+    setMeasuredItemsVersion((version) => version + 1)
+  }, [])
+
   const handleVirtualItemHeightChange = useCallback((itemKey: string, height: number) => {
     const measuredHeight = clampNumber(height, VIRTUAL_MIN_ITEM_HEIGHT, VIRTUAL_MAX_ITEM_HEIGHT)
     const previousHeight = virtualItemHeightsRef.current.get(itemKey)
     if (previousHeight !== undefined && Math.abs(previousHeight - measuredHeight) < 1) return
 
     virtualItemHeightsRef.current.set(itemKey, measuredHeight)
-    setMeasuredItemsVersion((version) => version + 1)
 
-    if (shouldAutoScrollRef.current) {
-      requestAnimationFrame(() => {
-        if (shouldAutoScrollRef.current) scrollToBottom('auto')
+    if (typeof requestAnimationFrame === 'undefined') {
+      pendingMeasuredHeightsRef.current = true
+      flushMeasuredHeightVersion()
+    } else if (!pendingMeasuredHeightsRef.current) {
+      pendingMeasuredHeightsRef.current = true
+      if (measureFlushFrameRef.current !== null) {
+        cancelAnimationFrame(measureFlushFrameRef.current)
+      }
+      measureFlushFrameRef.current = requestAnimationFrame(() => {
+        measureFlushFrameRef.current = null
+        flushMeasuredHeightVersion()
       })
     }
-  }, [scrollToBottom])
+  }, [flushMeasuredHeightVersion])
 
   const updateAutoScrollState = useCallback(() => {
     // Ignore scroll events triggered by our own programmatic scrolling to
@@ -1339,9 +1335,7 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
       syncVirtualViewportFromContainer(container)
       return
     }
-    flushSync(() => {
-      syncVirtualViewportFromContainer(container)
-    })
+    syncVirtualViewportFromContainer(container)
     const isAtBottom = isNearScrollBottom(container)
     shouldAutoScrollRef.current = isAtBottom
     setShowJumpToLatest(!isAtBottom)
@@ -1358,7 +1352,11 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
       lastSessionIdRef.current = resolvedSessionId
       virtualItemHeightsRef.current.clear()
       virtualItemMetricCacheRef.current.clear()
-      setIsVirtualScrollActive(false)
+      pendingMeasuredHeightsRef.current = false
+      if (measureFlushFrameRef.current !== null) {
+        cancelAnimationFrame(measureFlushFrameRef.current)
+        measureFlushFrameRef.current = null
+      }
       setMeasuredItemsVersion((version) => version + 1)
 
       const container = scrollContainerRef.current
@@ -1458,9 +1456,6 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
     }),
     [renderItemKeys, renderItems],
   )
-  const virtualOverscanPx = isVirtualScrollActive
-    ? VIRTUAL_SCROLL_OVERSCAN_PX
-    : VIRTUAL_IDLE_OVERSCAN_PX
   const virtualTranscriptWindow = useMemo(
     () => buildVirtualTranscriptWindow(
       renderItems,
@@ -1468,9 +1463,9 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
       renderItemMetrics,
       virtualItemHeightsRef.current,
       virtualViewport,
-      virtualOverscanPx,
+      VIRTUAL_OVERSCAN_PX,
     ),
-    [measuredItemsVersion, renderItemKeys, renderItemMetrics, renderItems, virtualOverscanPx, virtualViewport],
+    [measuredItemsVersion, renderItemKeys, renderItemMetrics, renderItems, virtualViewport],
   )
   const confirmTurnCard = useMemo(
     () => turnChangeCards.find((card) => card.target.messageId === turnUndoConfirmTargetId) ?? null,
@@ -1711,9 +1706,6 @@ export function MessageList({ sessionId, compact = false }: MessageListProps = {
       <div
         ref={scrollContainerRef}
         onScroll={updateAutoScrollState}
-        onWheel={markVirtualScrollActive}
-        onTouchMove={markVirtualScrollActive}
-        onPointerDown={markVirtualScrollActive}
         className={`${CHAT_SCROLL_AREA_CLASS} h-full overflow-y-auto ${compact ? 'px-3 py-3 pb-5' : 'px-4 py-4'}`}
       >
         <div
