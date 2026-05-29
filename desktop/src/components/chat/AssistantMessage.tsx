@@ -52,10 +52,8 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
   useEffect(() => {
     const root = contentRef.current
     if (!root || !sessionId || isStreaming) return
-    root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
-      const href = link.getAttribute('href') ?? ''
-      if (classifyPreviewLink(href).kind === 'ignored') return
-      if (link.nextElementSibling instanceof HTMLElement && link.nextElementSibling.classList.contains('md-open-with')) return
+
+    function makeTrigger(href: string): HTMLButtonElement {
       const trigger = document.createElement('button')
       trigger.type = 'button'
       trigger.className = 'md-open-with'
@@ -64,7 +62,23 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
       trigger.tabIndex = -1
       trigger.textContent = '▾'
       trigger.style.cssText = 'margin-left:3px;padding:0 3px;border:none;background:transparent;color:var(--color-text-tertiary);cursor:pointer;font-size:11px;line-height:1;vertical-align:middle'
-      link.after(trigger)
+      return trigger
+    }
+
+    root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
+      const href = link.getAttribute('href') ?? ''
+      if (classifyPreviewLink(href).kind === 'ignored') return
+      if (link.nextElementSibling instanceof HTMLElement && link.nextElementSibling.classList.contains('md-open-with')) return
+      link.after(makeTrigger(href))
+    })
+
+    root.querySelectorAll<HTMLElement>('code').forEach((code) => {
+      if (code.closest('pre')) return
+      const text = (code.textContent ?? '').trim()
+      const kind = classifyPreviewLink(text).kind
+      if (kind !== 'browser-localhost' && kind !== 'remote') return
+      if (code.nextElementSibling instanceof HTMLElement && code.nextElementSibling.classList.contains('md-open-with')) return
+      code.after(makeTrigger(text))
     })
   }, [content, isStreaming, sessionId])
 

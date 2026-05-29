@@ -130,3 +130,46 @@ describe('AssistantMessage open-with trigger injection', () => {
     expect(screen.getByText('openWith.systemBrowser')).toBeInTheDocument()
   })
 })
+
+describe('AssistantMessage open-with trigger injection — inline code URLs', () => {
+  it('injects a ▾ trigger next to an inline-code localhost URL', async () => {
+    render(
+      <AssistantMessage
+        sessionId="s1"
+        content={'运行地址 `http://localhost:9527/`'}
+        isStreaming={false}
+      />,
+    )
+    // The trigger comes from the <code> path (no <a> in this content)
+    expect(screen.getByLabelText('打开方式')).toBeInTheDocument()
+  })
+
+  it('clicking the trigger next to inline-code URL opens menu with in-app-browser and system-browser items', async () => {
+    render(
+      <AssistantMessage
+        sessionId="s1"
+        content={'运行地址 `http://localhost:9527/`'}
+        isStreaming={false}
+      />,
+    )
+
+    const trigger = screen.getByLabelText('打开方式')
+    fireEvent.click(trigger)
+
+    await waitFor(() => {
+      expect(screen.getByText('openWith.inAppBrowser')).toBeInTheDocument()
+    })
+    expect(screen.getByText('openWith.systemBrowser')).toBeInTheDocument()
+  })
+
+  it('does NOT inject a trigger for non-URL inline code', () => {
+    render(
+      <AssistantMessage
+        sessionId="s1"
+        content={'装一下 `npm install`'}
+        isStreaming={false}
+      />,
+    )
+    expect(screen.queryByLabelText('打开方式')).toBeNull()
+  })
+})
