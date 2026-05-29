@@ -1655,7 +1655,7 @@ fn start_server_sidecar(app: &AppHandle) -> Result<ServerRuntime, String> {
     });
 
     if let Err(err) = wait_for_server(control_host, port) {
-        let _ = child.kill();
+        kill_sidecar_child(child);
         return Err(format_server_startup_error(&err, &startup_logs));
     }
 
@@ -1672,7 +1672,7 @@ fn stop_server_sidecar(app: &AppHandle) {
     };
 
     if let Some(runtime) = guard.runtime.take() {
-        let _ = runtime.child.kill();
+        kill_sidecar_child(runtime.child);
     }
 }
 
@@ -1799,8 +1799,27 @@ fn stop_adapters_sidecar(app: &AppHandle) {
         return;
     };
     for child in guard.drain(..) {
-        let _ = child.kill();
+        kill_sidecar_child(child);
     }
+}
+
+fn kill_sidecar_child(child: CommandChild) {
+    #[cfg(target_os = "windows")]
+    {
+        let pid = child.pid().to_string();
+        if StdCommand::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+        {
+            return;
+        }
+    }
+
+    let _ = child.kill();
 }
 
 #[cfg(unix)]

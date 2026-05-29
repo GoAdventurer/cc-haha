@@ -541,7 +541,7 @@ describe('SessionService', () => {
     expect(page2.sessions).toHaveLength(1)
   })
 
-  it('should only parse the requested page when listing many sessions', async () => {
+  it('should only scan the requested page when listing many sessions', async () => {
     for (let i = 0; i < 12; i++) {
       const id = `1000000${i.toString(16)}-bbbb-cccc-dddd-eeeeeeeeeeee`
       const filePath = await writeSessionFile('-tmp-many-sessions', id, [
@@ -553,20 +553,20 @@ describe('SessionService', () => {
     }
 
     const serviceWithSpy = service as unknown as {
-      readJsonlFile: (...args: unknown[]) => Promise<unknown>
+      scanSessionListSummary: (...args: unknown[]) => Promise<unknown>
     }
-    const originalReadJsonlFile = serviceWithSpy.readJsonlFile.bind(service)
-    let readCount = 0
-    serviceWithSpy.readJsonlFile = async (...args) => {
-      readCount += 1
-      return originalReadJsonlFile(...args)
+    const originalScanSessionListSummary = serviceWithSpy.scanSessionListSummary.bind(service)
+    let scanCount = 0
+    serviceWithSpy.scanSessionListSummary = async (...args) => {
+      scanCount += 1
+      return originalScanSessionListSummary(...args)
     }
 
     const result = await service.listSessions({ limit: 3, offset: 0 })
 
     expect(result.total).toBe(12)
     expect(result.sessions).toHaveLength(3)
-    expect(readCount).toBe(3)
+    expect(scanCount).toBe(3)
   })
 
   it('should reuse cached list metadata for repeated requests', async () => {
@@ -581,20 +581,20 @@ describe('SessionService', () => {
     }
 
     const serviceWithSpy = service as unknown as {
-      readJsonlFile: (...args: unknown[]) => Promise<unknown>
+      scanSessionListSummary: (...args: unknown[]) => Promise<unknown>
     }
-    const originalReadJsonlFile = serviceWithSpy.readJsonlFile.bind(service)
-    let readCount = 0
-    serviceWithSpy.readJsonlFile = async (...args) => {
-      readCount += 1
-      return originalReadJsonlFile(...args)
+    const originalScanSessionListSummary = serviceWithSpy.scanSessionListSummary.bind(service)
+    let scanCount = 0
+    serviceWithSpy.scanSessionListSummary = async (...args) => {
+      scanCount += 1
+      return originalScanSessionListSummary(...args)
     }
 
     const first = await service.listSessions({ limit: 3, offset: 0 })
     const second = await service.listSessions({ limit: 3, offset: 0 })
 
     expect(first.sessions.map((session) => session.id)).toEqual(second.sessions.map((session) => session.id))
-    expect(readCount).toBe(3)
+    expect(scanCount).toBe(3)
   })
 
   it('should invalidate cached list metadata after writes', async () => {

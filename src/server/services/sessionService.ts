@@ -5,9 +5,11 @@
  * 确保 Desktop App 与 CLI 的数据完全互通。
  */
 
+import { createReadStream } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
+import { createInterface } from 'node:readline'
 import { ApiError } from '../middleware/errorHandler.js'
 import { sanitizePath as sanitizePortablePath } from '../../utils/sessionStoragePortable.js'
 import type { FileHistorySnapshot } from '../../utils/fileHistory.js'
@@ -220,6 +222,16 @@ type PersistedWorktreeSession = {
   hookBased?: boolean
 }
 
+type SessionListSummary = {
+  title: string
+  createdAt: string
+  messageCount: number
+  workDir: string | null
+  permissionMode?: string
+  repository?: PreparedSessionWorkspace['repository']
+  worktreeSession?: PersistedWorktreeSession | null
+}
+
 const VALID_SESSION_PERMISSION_MODES = new Set([
   'default',
   'acceptEdits',
@@ -321,6 +333,132 @@ export class SessionService {
     return entries
   }
 
+  private async scanSessionListSummary(
+    filePath: string,
+    projectDir: string,
+    stat: { birthtime: Date },
+  ): Promise<SessionListSummary> {
+    let createdAt = stat.birthtime.toISOString()
+    let hasCreatedAt = false
+    let messageCount = 0
+    let firstUserTitle: string | null = null
+    let goalTitle: string | null = null
+    let aiTitle: string | null = null
+    let customTitle: string | null = null
+    let latestWorkDir: string | null = null
+    let latestCwd: string | null = null
+    let permissionMode: string | undefined
+    let repository: PreparedSessionWorkspace['repository'] | undefined
+    let worktreeSession: PersistedWorktreeSession | null | undefined
+
+    const stream = createReadStream(filePath, { encoding: 'utf8' })
+    const lines = createInterface({
+      input: stream,
+      crlfDelay: Infinity,
+    })
+
+    try {
+      for await (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+
+        let entry: RawEntry
+        try {
+          entry = JSON.parse(trimmed) as RawEntry
+        } catch {
+          continue
+        }
+
+        if (!hasCreatedAt && entry.timestamp) {
+          createdAt = entry.timestamp
+          hasCreatedAt = true
+        }
+
+        if (
+          (entry.type === 'user' || entry.type === 'assistant') &&
+          entry.message?.role
+        ) {
+          messageCount += 1
+        }
+
+        if (entry.type === 'session-meta') {
+          if (typeof (entry as Record<string, unknown>).workDir === 'string') {
+            latestWorkDir = normalizeDriveRootPathForPlatform(
+              (entry as Record<string, unknown>).workDir as string,
+            )
+          }
+          if (
+            typeof entry.permissionMode === 'string' &&
+            VALID_SESSION_PERMISSION_MODES.has(entry.permissionMode)
+          ) {
+            permissionMode = entry.permissionMode
+          }
+        }
+
+        if (typeof entry.cwd === 'string' && entry.cwd.trim()) {
+          latestCwd = normalizeDriveRootPathForPlatform(entry.cwd)
+        }
+
+        const candidateRepository = (entry as Record<string, unknown>)?.repository
+        if (candidateRepository && typeof candidateRepository === 'object') {
+          repository = candidateRepository as PreparedSessionWorkspace['repository']
+        }
+
+        if (entry.type === 'worktree-state') {
+          if (entry.worktreeSession === null) {
+            worktreeSession = null
+          } else if (
+            entry.worktreeSession &&
+            typeof entry.worktreeSession === 'object' &&
+            typeof entry.worktreeSession.worktreePath === 'string' &&
+            typeof entry.worktreeSession.worktreeName === 'string'
+          ) {
+            worktreeSession = entry.worktreeSession
+          }
+        }
+
+        if (entry.type === 'custom-title' && entry.customTitle) {
+          customTitle = String(entry.customTitle)
+        }
+
+        if (!goalTitle) {
+          goalTitle = this.goalCreationCommandTitle(entry)
+        }
+
+        if (entry.type === 'ai-title' && entry.aiTitle) {
+          const title = cleanSessionTitleSource(String(entry.aiTitle))
+          if (title) aiTitle = title
+        }
+
+        if (
+          !firstUserTitle &&
+          entry.type === 'user' &&
+          !entry.isMeta &&
+          entry.message?.role === 'user'
+        ) {
+          firstUserTitle = this.extractUserMessageTitle(entry.message.content)
+        }
+      }
+    } finally {
+      lines.close()
+      stream.destroy()
+    }
+
+    return {
+      title: customTitle ||
+        goalTitle ||
+        aiTitle ||
+        firstUserTitle ||
+        'Untitled Session',
+      createdAt,
+      messageCount,
+      workDir: latestWorkDir || latestCwd || this.desanitizePath(projectDir),
+      ...(permissionMode ? { permissionMode } : {}),
+      ...(repository ? { repository } : {}),
+      ...(worktreeSession !== undefined ? { worktreeSession } : {}),
+    }
+  }
+
   private async appendJsonlEntry(filePath: string, entry: Record<string, unknown>): Promise<void> {
     const line = JSON.stringify(entry) + '\n'
     await fs.appendFile(filePath, line, 'utf-8')
@@ -398,7 +536,25 @@ export class SessionService {
   ): Promise<string | null> {
     const worktreeSession = this.resolveWorktreeSessionFromEntries(entries)
     const repository = this.resolveRepositoryFromEntries(entries)
+    return this.resolveProjectRootFromSessionMetadata({
+      worktreeSession,
+      repository,
+      workDir,
+      fallbackProjectDir,
+    })
+  }
 
+  private async resolveProjectRootFromSessionMetadata({
+    worktreeSession,
+    repository,
+    workDir,
+    fallbackProjectDir,
+  }: {
+    worktreeSession?: PersistedWorktreeSession | null
+    repository?: PreparedSessionWorkspace['repository']
+    workDir: string | null
+    fallbackProjectDir?: string
+  }): Promise<string | null> {
     const candidate = worktreeSession?.originalCwd ||
       repository?.repoRoot ||
       workDir ||
@@ -947,6 +1103,23 @@ export class SessionService {
     return 'Untitled Session'
   }
 
+  private extractUserMessageTitle(content: unknown): string | null {
+    let text: string | undefined
+    if (typeof content === 'string') {
+      text = content
+    } else if (Array.isArray(content)) {
+      const textBlock = content.find(
+        (block: Record<string, unknown>) => block.type === 'text' && typeof block.text === 'string'
+      )
+      if (textBlock) text = textBlock.text as string
+    }
+    if (!text) return null
+
+    const title = cleanSessionTitleSource(text)
+    if (!title) return null
+    return title.length > 80 ? `${title.slice(0, 80)}...` : title
+  }
+
   // --------------------------------------------------------------------------
   // Session file discovery
   // --------------------------------------------------------------------------
@@ -1364,48 +1537,38 @@ export class SessionService {
     const limit = options?.limit ?? 50
     const paginatedFiles = filesWithStats.slice(offset, offset + limit)
 
-    // Build session list items with metadata from file stats & first entries
-    const items = (await Promise.all(paginatedFiles.map(async ({ filePath, projectDir, sessionId, stat }) => {
+    // Build session list items with metadata from file stats & a streaming
+    // transcript summary. Keep this sequential so large JSONL files are not
+    // loaded into memory concurrently by the sidebar's frequent refresh.
+    const items: SessionListItem[] = []
+    for (const { filePath, projectDir, sessionId, stat } of paginatedFiles) {
       try {
-        const entries = await this.readJsonlFile(filePath)
-        const workDir = this.resolveWorkDirFromEntries(entries, projectDir)
-        const permissionMode = this.resolvePermissionModeFromEntries(entries)
-        const projectRoot = await this.resolveProjectRootFromEntries(entries, workDir, projectDir)
+        const summary = await this.scanSessionListSummary(filePath, projectDir, stat)
+        const workDir = summary.workDir
+        const projectRoot = await this.resolveProjectRootFromSessionMetadata({
+          worktreeSession: summary.worktreeSession,
+          repository: summary.repository,
+          workDir,
+          fallbackProjectDir: projectDir,
+        })
         const workDirExists = await this.pathExists(workDir)
 
-        // Count transcript messages only (user + assistant)
-        const messageCount = entries.filter(
-          (e) => (e.type === 'user' || e.type === 'assistant') && e.message?.role
-        ).length
-
-        const title = this.extractTitle(entries)
-
-        // Find the earliest timestamp from entries, fallback to file birthtime
-        let createdAt = stat.birthtime.toISOString()
-        for (const e of entries) {
-          if (e.timestamp) {
-            createdAt = e.timestamp
-            break
-          }
-        }
-
-        return {
+        items.push({
           id: sessionId,
-          title,
-          createdAt,
+          title: summary.title,
+          createdAt: summary.createdAt,
           modifiedAt: stat.mtime.toISOString(),
-          messageCount,
+          messageCount: summary.messageCount,
           projectPath: projectDir,
           projectRoot,
           workDir,
           workDirExists,
-          permissionMode,
-        }
+          permissionMode: summary.permissionMode,
+        })
       } catch {
         // Skip unreadable files
-        return null
       }
-    }))).filter((item): item is SessionListItem => item !== null)
+    }
 
     const result = { sessions: items, total }
     this.sessionListCache.set(cacheKey, {
