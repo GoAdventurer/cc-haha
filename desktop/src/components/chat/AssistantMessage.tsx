@@ -68,7 +68,7 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
       <div
         data-message-shell="assistant"
         data-layout={documentLayout ? 'document' : 'bubble'}
-        className={`group flex min-w-0 flex-col items-start gap-2 ${
+        className={`group flex min-w-0 flex-col items-start ${
           documentLayout
             ? 'w-full max-w-full'
             : 'max-w-[88%] sm:max-w-[80%] lg:max-w-[72%]'
