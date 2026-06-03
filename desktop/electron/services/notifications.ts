@@ -23,15 +23,6 @@ export function validateNotificationOptions(value: unknown): value is DesktopNot
     && (record.extra === undefined || (typeof record.extra === 'object' && record.extra !== null && !Array.isArray(record.extra)))
 }
 
-// NOTE: Electron has no API to read the macOS user authorization status from the
-// main process (`systemPreferences.getNotificationSettings()` does not exist; the
-// only option is the native `macos-notification-state` module, which we avoid to
-// keep the cross-platform build dependency-free). `Notification.isSupported()`
-// reflects OS capability, NOT whether the user granted permission, so this can
-// report 'granted' even when the user denied notifications in System Settings.
-// The authoritative delivery signal is the 'failed' lifecycle event handled in
-// sendDesktopNotification(); on macOS, events only emit correctly for code-signed
-// builds (unsigned/ad-hoc builds emit 'failed').
 export function notificationPermissionState(
   NotificationClass: ElectronNotificationConstructor,
 ): NotificationPermissionState {
