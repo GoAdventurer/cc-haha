@@ -218,6 +218,23 @@ describe('Settings > General tab', () => {
       },
       h5AccessDiagnostics: null,
       h5AccessError: null,
+      outputStyle: 'default',
+      outputStyles: [
+        {
+          value: 'default',
+          label: 'Default',
+          description: 'Default response style',
+          source: 'built-in',
+        },
+      ],
+      outputStyleScope: 'userSettings',
+      outputStyleWorkDir: null,
+      outputStylesLoading: false,
+      outputStyleError: null,
+      fetchOutputStyles: vi.fn().mockResolvedValue(undefined),
+      setOutputStyle: vi.fn().mockImplementation(async (outputStyle: string) => {
+        useSettingsStore.setState({ outputStyle })
+      }),
       setThinkingEnabled: vi.fn().mockImplementation(async (enabled: boolean) => {
         useSettingsStore.setState({ thinkingEnabled: enabled })
       }),
