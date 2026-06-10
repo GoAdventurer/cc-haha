@@ -3209,6 +3209,7 @@ describe('WebSocket Chat Integration', () => {
         return body.status?.permissionMode === 'default'
       }, `persisted bypass-to-default permission switch for ${sessionId}`)
       expect(startCalls).toHaveLength(1)
+      expect(conversationService.getSessionPermissionMode(sessionId)).toBe('default')
       expect(messages.slice(switchStartIndex).some((msg) => msg.type === 'error')).toBe(false)
     } finally {
       ws.close()

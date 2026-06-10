@@ -186,6 +186,67 @@ describe('ActiveSession task polling', () => {
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-variant', 'default')
   })
 
+  it('opens the current session trace in a separate live window', () => {
+    const sessionId = 'trace-window-session'
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'Trace Window Session',
+        createdAt: '2026-05-07T00:00:00.000Z',
+        modifiedAt: '2026-05-07T00:00:00.000Z',
+        messageCount: 1,
+        projectPath: '/workspace/project',
+        workDir: '/workspace/project',
+        workDirExists: true,
+      }],
+      activeSessionId: sessionId,
+      isLoading: false,
+      error: null,
+    })
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Trace Window Session', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: {
+          messages: [{ id: 'msg-1', type: 'assistant_text', content: 'hello', timestamp: 1 }],
+          chatState: 'idle',
+          connectionState: 'connected',
+          streamingText: '',
+          streamingToolInput: '',
+          activeToolUseId: null,
+          activeToolName: null,
+          activeThinkingId: null,
+          pendingPermission: null,
+          pendingComputerUsePermission: null,
+          tokenUsage: { input_tokens: 0, output_tokens: 0 },
+          elapsedSeconds: 0,
+          statusVerb: '',
+          slashCommands: [],
+          agentTaskNotifications: {},
+          elapsedTimer: null,
+        },
+      },
+    })
+
+    try {
+      render(<ActiveSession />)
+      fireEvent.click(screen.getByLabelText(/独立|separate/i))
+
+      expect(openSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`traceSessionId=${sessionId}`),
+        '_blank',
+        'noopener,noreferrer',
+      )
+      expect(openSpy.mock.calls[0]?.[0]).toContain('traceWindow=1')
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
+
   it('renders the current goal as a lightweight header strip without a page-level panel', () => {
     const sessionId = 'goal-visible-session'
 

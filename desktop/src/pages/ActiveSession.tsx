@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Target } from 'lucide-react'
+import { ExternalLink, RadioTower, Target } from 'lucide-react'
 import {
   SCHEDULED_TAB_ID,
   SETTINGS_TAB_ID,
   TERMINAL_TAB_PREFIX,
+  TRACE_TAB_PREFIX,
   useTabStore,
   type TabType,
 } from '../stores/tabStore'
@@ -31,6 +32,8 @@ import type { ActiveGoalState } from '../types/chat'
 import { useMobileViewport } from '../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../lib/desktopRuntime'
 import { publicAssetPath } from '../lib/publicAsset'
+import { getDesktopHost } from '../lib/desktopHost'
+import { buildTraceWindowUrl } from '../lib/traceLaunch'
 
 const TASK_POLL_INTERVAL_MS = 1000
 const WORKSPACE_RESIZE_STEP = 32
@@ -44,7 +47,8 @@ function isSessionTabState(activeTabId: string | null, activeTabType: TabType | 
   if (activeTabType) return false
   return activeTabId !== SETTINGS_TAB_ID &&
     activeTabId !== SCHEDULED_TAB_ID &&
-    !activeTabId.startsWith(TERMINAL_TAB_PREFIX)
+    !activeTabId.startsWith(TERMINAL_TAB_PREFIX) &&
+    !activeTabId.startsWith(TRACE_TAB_PREFIX)
 }
 
 function getSessionTerminalCwd(session: SessionListItem | undefined) {
@@ -360,6 +364,22 @@ export function ActiveSession() {
     return t('session.timeDays', { n: Math.floor(diff / 86400000) })
   }, [session?.modifiedAt, t])
 
+  const openTrace = () => {
+    if (!activeTabId) return
+    const title = session?.title || t('session.untitled')
+    useTabStore.getState().openTraceTab(activeTabId, `${t('trace.title')}: ${title}`)
+  }
+
+  const openTraceWindow = () => {
+    if (!activeTabId) return
+    const host = getDesktopHost()
+    if (host.trace) {
+      void host.trace.openWindow(activeTabId)
+      return
+    }
+    window.open(buildTraceWindowUrl(activeTabId), '_blank', 'noopener,noreferrer')
+  }
+
   if (!activeTabId) return null
 
   return (
@@ -450,15 +470,36 @@ export function ActiveSession() {
                   }
                 >
                   <div className={showRightPanel ? 'min-w-0 flex-1' : 'mx-auto w-full max-w-[860px] min-w-0'}>
-                    <h1
-                      className={
-                        showRightPanel
-                          ? 'truncate text-[15px] font-bold font-headline leading-tight text-on-surface'
-                          : 'text-lg font-bold font-headline text-on-surface leading-tight'
-                      }
-                    >
-                      {session?.title || t('session.untitled')}
-                    </h1>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <h1
+                        className={
+                          showRightPanel
+                            ? 'min-w-0 flex-1 truncate text-[15px] font-bold font-headline leading-tight text-on-surface'
+                            : 'min-w-0 flex-1 text-lg font-bold font-headline text-on-surface leading-tight'
+                        }
+                      >
+                        {session?.title || t('session.untitled')}
+                      </h1>
+                      <button
+                        type="button"
+                        aria-label={t('trace.open')}
+                        title={t('trace.open')}
+                        onClick={openTrace}
+                        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] px-2.5 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
+                      >
+                        <RadioTower size={14} strokeWidth={2} aria-hidden="true" />
+                        <span className={showRightPanel ? 'sr-only' : 'hidden sm:inline'}>{t('trace.open')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={t('trace.openWindow')}
+                        title={t('trace.openWindow')}
+                        onClick={openTraceWindow}
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[var(--color-border)] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
+                      >
+                        <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    </div>
                     <div
                       className={
                         showRightPanel

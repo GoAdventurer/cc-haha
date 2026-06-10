@@ -1456,6 +1456,8 @@ export function GeneralSettings() {
     setWebSearch,
     network,
     setNetwork,
+    traceCapture,
+    setTraceCaptureEnabled,
     responseLanguage,
     setResponseLanguage,
     appMode,
@@ -2085,6 +2087,34 @@ export function GeneralSettings() {
             <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
               {t('settings.general.thinkingHint')}
             </div>
+          </div>
+        </label>
+      </div>
+
+      <div className="mt-8">
+        <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.traceTitle')}</h2>
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.traceDescription')}</p>
+        <label className="flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3 cursor-pointer hover:border-[var(--color-border-focus)] transition-colors">
+          <input
+            type="checkbox"
+            aria-label={t('settings.general.traceEnabled')}
+            checked={traceCapture.enabled}
+            onChange={(e) => void setTraceCaptureEnabled(e.target.checked)}
+            className="peer sr-only"
+          />
+          <SettingsCheckboxMark checked={traceCapture.enabled} />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.general.traceEnabled')}
+            </div>
+            <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
+              {traceCapture.enabled ? t('settings.general.traceHintOn') : t('settings.general.traceHintOff')}
+            </div>
+            {traceCapture.storageDir && (
+              <div className="mt-2 truncate rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 font-mono text-[11px] text-[var(--color-text-secondary)]">
+                {traceCapture.storageDir}
+              </div>
+            )}
           </div>
         </label>
       </div>

@@ -7,6 +7,7 @@
  *   GET    /api/sessions            — 列出会话
  *   GET    /api/sessions/:id        — 获取会话详情
  *   GET    /api/sessions/:id/messages — 获取会话消息
+ *   GET    /api/sessions/:id/trace — 获取会话级模型调用 trace
  *   GET    /api/sessions/:id/turn-checkpoints — 获取按轮次保留的 checkpoint 预览
  *   GET    /api/sessions/:id/turn-checkpoints/diff — 获取绑定到指定 checkpoint 的 diff
  *   POST   /api/sessions            — 创建新会话
@@ -39,6 +40,7 @@ import {
   SessionBranchingError,
 } from '../../utils/sessionBranching.js'
 import { registerFilesystemAccessRoot } from '../services/filesystemAccessRoots.js'
+import { traceCaptureService } from '../services/traceCaptureService.js'
 
 const workspaceService = new WorkspaceService(
   async (sessionId) => (
@@ -108,6 +110,16 @@ export async function handleSessionsApi(
         )
       }
       return await getSessionMessages(sessionId)
+    }
+
+    if (subResource === 'trace') {
+      if (req.method !== 'GET') {
+        return Response.json(
+          { error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed` },
+          { status: 405 }
+        )
+      }
+      return await getSessionTrace(sessionId)
     }
 
     if (subResource === 'git-info') {
@@ -248,6 +260,24 @@ async function getSessionMessages(sessionId: string): Promise<Response> {
     sessionService.getSessionTaskNotifications(sessionId),
   ])
   return Response.json({ messages, taskNotifications })
+}
+
+async function getSessionTrace(sessionId: string): Promise<Response> {
+  const [trace, session] = await Promise.all([
+    traceCaptureService.getSessionTrace(sessionId),
+    sessionService.getSession(sessionId).catch(() => null),
+  ])
+  return Response.json({
+    ...trace,
+    session: session
+      ? {
+          id: session.id,
+          title: session.title,
+          projectPath: session.projectPath,
+          workDir: session.workDir,
+        }
+      : null,
+  })
 }
 
 async function handleSessionWorkspaceRoute(

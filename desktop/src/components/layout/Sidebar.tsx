@@ -5,7 +5,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { ConfirmDialog } from '../shared/ConfirmDialog'
 import type { SessionListItem } from '../../types/session'
-import { useTabStore, SETTINGS_TAB_ID, SCHEDULED_TAB_ID } from '../../stores/tabStore'
+import { useTabStore, SETTINGS_TAB_ID, SCHEDULED_TAB_ID, TRACE_LIST_TAB_ID } from '../../stores/tabStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { desktopUiPreferencesApi, type SidebarProjectPreferences } from '../../api/desktopUiPreferences'
@@ -684,6 +684,21 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
             icon={<ClockIcon />}
           >
             {t('sidebar.scheduled')}
+          </NavItem>
+        )}
+        {!isMobile && (
+          <NavItem
+            active={activeTabId === TRACE_LIST_TAB_ID}
+            collapsed={!expanded}
+            label={t('sidebar.traces')}
+            touchFriendly={isMobile}
+            onClick={() => {
+              useTabStore.getState().openTracesTab(t('sidebar.traces'))
+              closeMobileDrawer()
+            }}
+            icon={<span className="material-symbols-outlined text-[18px]">account_tree</span>}
+          >
+            {t('sidebar.traces')}
           </NavItem>
         )}
       </div>
