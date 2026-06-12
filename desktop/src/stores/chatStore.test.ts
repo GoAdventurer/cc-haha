@@ -3486,6 +3486,42 @@ describe('chatStore history mapping', () => {
     vi.useRealTimers()
   })
 
+  it('does not duplicate the current prompt when CLI replays it after thinking starts', () => {
+    const prompt = '# 角色与目标\n构建一个协同编辑器'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [
+            {
+              id: 'live-user',
+              type: 'user_text',
+              content: prompt,
+              timestamp: 1,
+            },
+          ],
+          chatState: 'thinking',
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'thinking',
+      text: 'I need to plan the implementation.',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: prompt,
+    })
+
+    const userMessages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages
+      .filter((message) => message.type === 'user_text')
+    expect(userMessages).toHaveLength(1)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toMatchObject([
+      { type: 'user_text', content: prompt },
+      { type: 'thinking', content: 'I need to plan the implementation.' },
+    ])
+  })
+
   it('flushes pending text before appending an error message', () => {
     vi.useFakeTimers()
 

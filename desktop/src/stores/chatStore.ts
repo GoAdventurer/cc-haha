@@ -2755,24 +2755,17 @@ function appendReplayedUserMessage(
   if (!displayContent) return messages
 
   const modelContent = parsed.modelContent ?? content.trim()
-  const optimisticIndex = findOptimisticQueuedUserMessageIndex(messages, modelContent)
-  if (optimisticIndex >= 0) {
-    const optimisticMessage = messages[optimisticIndex]
-    if (optimisticMessage?.type === 'user_text') {
+  const currentTurnUserIndex = findCurrentTurnUserMessageIndex(messages, modelContent)
+  if (currentTurnUserIndex >= 0) {
+    const optimisticMessage = messages[currentTurnUserIndex]
+    if (optimisticMessage?.type === 'user_text' && optimisticMessage.optimisticQueued) {
       const { optimisticQueued: _optimisticQueued, ...confirmedMessage } = optimisticMessage
       return [
-        ...messages.slice(0, optimisticIndex),
+        ...messages.slice(0, currentTurnUserIndex),
         confirmedMessage,
-        ...messages.slice(optimisticIndex + 1),
+        ...messages.slice(currentTurnUserIndex + 1),
       ]
     }
-  }
-
-  const last = messages[messages.length - 1]
-  if (
-    last?.type === 'user_text' &&
-    (last.modelContent ?? last.content).trim() === modelContent
-  ) {
     return messages
   }
 
@@ -2829,19 +2822,16 @@ function mapQueuedDisplayAttachments(attachments?: AttachmentRef[]): UIAttachmen
   }))
 }
 
-function findOptimisticQueuedUserMessageIndex(
+function findCurrentTurnUserMessageIndex(
   messages: UIMessage[],
   modelContent: string,
 ): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (
-      message?.type === 'user_text' &&
-      message.optimisticQueued &&
-      (message.modelContent ?? message.content).trim() === modelContent
-    ) {
-      return index
+    if (message?.type !== 'user_text') {
+      continue
     }
+    return (message.modelContent ?? message.content).trim() === modelContent ? index : -1
   }
   return -1
 }
