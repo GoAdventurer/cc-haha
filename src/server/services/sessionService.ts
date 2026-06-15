@@ -501,6 +501,30 @@ export class SessionService {
     }
   }
 
+  /**
+   * Resolve a session's display title + lightweight metadata from its JSONL file.
+   *
+   * Reuses the same title precedence as the session list (custom-title > goal >
+   * ai-title > first user message), so global session search shows real titles
+   * instead of the raw UUID file name.
+   */
+  async getSessionTitleAndMeta(filePath: string): Promise<{
+    title: string
+    modifiedAt: string
+    workDir: string | null
+    projectPath: string
+  }> {
+    const stat = await fs.stat(filePath)
+    const projectPath = path.basename(path.dirname(filePath))
+    const summary = await this.scanSessionListSummary(filePath, projectPath, stat)
+    return {
+      title: summary.title,
+      modifiedAt: stat.mtime.toISOString(),
+      workDir: summary.workDir ?? null,
+      projectPath,
+    }
+  }
+
   private async appendJsonlEntry(filePath: string, entry: Record<string, unknown>): Promise<void> {
     const line = JSON.stringify(entry) + '\n'
     await fs.appendFile(filePath, line, 'utf-8')
